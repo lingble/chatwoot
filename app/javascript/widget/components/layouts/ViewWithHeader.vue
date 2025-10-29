@@ -20,7 +20,7 @@ export default {
       showPopoutButton: false,
       scrollPosition: 0,
       ticking: true,
-      disableBranding: window.chatwootWebChannel.disableBranding || false,
+      disableBranding: true,
       requestID: null,
     };
   },
@@ -138,7 +138,7 @@ export default {
       <Banner />
       <router-view />
 
-      <Branding v-if="!isOnArticleViewer" :disable-branding="disableBranding" />
+      <Branding v-if="!isOnArticleViewer" disable-branding />
     </div>
   </div>
 </template>

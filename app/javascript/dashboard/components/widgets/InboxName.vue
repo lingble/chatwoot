@@ -16,7 +16,7 @@ defineProps({
       class="size-3 ltr:mr-1 rtl:ml-1 flex-shrink-0"
     />
     <span class="truncate">
-      {{ inbox.name }}
+      {{ inbox.name.replace(/\s*\[.*?\]\s*/g, '').trim() }}
     </span>
   </div>
 </template>
