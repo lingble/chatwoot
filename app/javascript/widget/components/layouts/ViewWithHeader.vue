@@ -128,7 +128,11 @@ export default {
         />
         <ChatHeader
           v-if="isHeaderCollapsed"
-          :title="channelConfig.websiteName"
+          :title="
+            (channelConfig.websiteName || '')
+              .replace(/\s*\[[^\]]*?]\s*/g, '')
+              .trim()
+          "
           :avatar-url="channelConfig.avatarUrl"
           :show-popout-button="appConfig.showPopoutButton"
           :available-agents="availableAgents"
