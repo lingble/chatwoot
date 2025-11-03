@@ -20,7 +20,7 @@ export default {
       showPopoutButton: false,
       scrollPosition: 0,
       ticking: true,
-      disableBranding: window.chatwootWebChannel.disableBranding || false,
+      disableBranding: true,
       requestID: null,
     };
   },
@@ -128,7 +128,11 @@ export default {
         />
         <ChatHeader
           v-if="isHeaderCollapsed"
-          :title="channelConfig.websiteName"
+          :title="
+            (channelConfig.websiteName || '')
+              .replace(/\s*\[[^\]]*?]\s*/g, '')
+              .trim()
+          "
           :avatar-url="channelConfig.avatarUrl"
           :show-popout-button="appConfig.showPopoutButton"
           :available-agents="availableAgents"
@@ -138,7 +142,7 @@ export default {
       <Banner />
       <router-view />
 
-      <Branding v-if="!isOnArticleViewer" :disable-branding="disableBranding" />
+      <Branding v-if="!isOnArticleViewer" disable-branding />
     </div>
   </div>
 </template>
