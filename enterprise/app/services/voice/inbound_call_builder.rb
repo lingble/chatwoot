@@ -1,82 +1,106 @@
 class Voice::InboundCallBuilder
-  pattr_initialize [:account!, :inbox!, :from_number!, :to_number, :call_sid!]
+  attr_reader :inbox, :call_sid, :provider, :extra_meta, :source_ids, :contact_attributes
 
-  attr_reader :conversation
-
-  def perform
-    contact = find_or_create_contact!
-    contact_inbox = find_or_create_contact_inbox!(contact)
-    @conversation = find_or_create_conversation!(contact, contact_inbox)
-    create_call_message_if_needed!
-    self
+  # `caller` carries the contact identity: { source_ids:, contact_attributes: }. Twilio passes
+  # its single +phone source_id; WhatsApp passes the message-path phone/user_id/parent_user_id set.
+  def self.perform!(inbox:, call_sid:, caller:, provider: :twilio, extra_meta: {})
+    new(inbox: inbox, call_sid: call_sid, caller: caller, provider: provider, extra_meta: extra_meta).perform!
   end
 
-  def twiml_response
-    response = Twilio::TwiML::VoiceResponse.new
-    response.say(message: 'Please wait while we connect you to an agent')
-    response.to_s
+  def initialize(inbox:, call_sid:, caller:, provider: :twilio, extra_meta: {})
+    @inbox = inbox
+    @call_sid = call_sid
+    @provider = provider.to_sym
+    @extra_meta = extra_meta || {}
+    @source_ids = Array(caller[:source_ids]).compact_blank
+    @contact_attributes = caller[:contact_attributes] || {}
+  end
+
+  def perform!
+    existing = find_existing_call
+    return existing if existing
+
+    ActiveRecord::Base.transaction do
+      contact_inbox = ensure_contact_inbox!
+      contact = contact_inbox.contact
+      conversation = resolve_conversation!(contact, contact_inbox)
+      call = create_call!(contact, conversation)
+      message = Voice::CallMessageBuilder.new(call).perform!
+      call.update!(message_id: message.id)
+      call
+    end
+  rescue ActiveRecord::RecordNotUnique
+    # A concurrent provider retry won the create race; return what now exists.
+    find_existing_call || raise
   end
 
   private
 
-  def find_or_create_conversation!(contact, contact_inbox)
-    account.conversations.find_or_create_by!(
-      account_id: account.id,
-      inbox_id: inbox.id,
-      identifier: call_sid
-    ) do |conv|
-      conv.contact_id = contact.id
-      conv.contact_inbox_id = contact_inbox.id
-      conv.additional_attributes = {
-        'call_direction' => 'inbound',
-        'call_status' => 'ringing'
-      }
-    end
+  def account
+    inbox.account
   end
 
-  def create_call_message!
-    content_attrs = call_message_content_attributes
+  def find_existing_call
+    Call.where(account_id: account.id, inbox_id: inbox.id)
+        .find_by(provider: provider, provider_call_id: call_sid)
+  end
 
-    @conversation.messages.create!(
-      account_id: account.id,
+  # Resolve the contact/ContactInbox the same way inbound messages do — match across every
+  # candidate source_id (phone + BSUID aliases) so a call reuses the existing contact. Shared
+  # with messaging via ContactInboxSourceIdResolver, which also rescues the concurrent-webhook
+  # create race.
+  #
+  # WhatsApp asks for the preferred alias so a call lands on the exact BSUID ContactInbox, the
+  # same one a message resolves; without it a legacy caller would keep answering through the
+  # phone row while messages moved on. Twilio has a single phone identity and opts out.
+  def ensure_contact_inbox!
+    ContactInboxSourceIdResolver.new(
+      inbox: inbox, source_ids: source_ids, contact_attributes: contact_attributes,
+      prefer_first_source_id: whatsapp_provider?
+    ).perform
+  end
+
+  def resolve_conversation!(contact, contact_inbox)
+    reusable = reusable_conversation(contact_inbox)
+    return reusable if reusable
+
+    account.conversations.create!(
+      contact_inbox_id: contact_inbox.id,
       inbox_id: inbox.id,
-      message_type: :incoming,
-      sender: @conversation.contact,
-      content: 'Voice Call',
-      content_type: 'voice_call',
-      content_attributes: content_attrs
+      contact_id: contact.id,
+      status: :open
     )
   end
 
-  def create_call_message_if_needed!
-    return if @conversation.messages.voice_calls.exists?
+  # Scoped to the resolved ContactInbox, never to the contact. A dashboard merge leaves unrelated
+  # WhatsApp identities on the same contact, and a contact-wide lookup cannot tell them apart: it
+  # would answer a call through another identity's source_id. The conversation opened under a
+  # previous identity stays where it is, reachable under previous conversations.
+  def reusable_conversation(contact_inbox)
+    conversations = contact_inbox.conversations
+    return conversations.last if inbox.lock_to_single_conversation
 
-    create_call_message!
+    conversations.where.not(status: :resolved).last
   end
 
-  def call_message_content_attributes
-    {
-      data: {
-        call_sid: call_sid,
-        status: 'ringing',
-        conversation_id: @conversation.display_id,
-        call_direction: 'inbound',
-        from_number: from_number,
-        to_number: to_number,
-        meta: {
-          created_at: Time.current.to_i,
-          ringing_at: Time.current.to_i
-        }
-      }
-    }
+  def whatsapp_provider?
+    provider == :whatsapp
   end
 
-  def find_or_create_contact!
-    account.contacts.find_by(phone_number: from_number) ||
-      account.contacts.create!(phone_number: from_number, name: 'Unknown Caller')
-  end
-
-  def find_or_create_contact_inbox!(contact)
-    ContactInbox.where(contact_id: contact.id, inbox_id: inbox.id, source_id: from_number).first_or_create!
+  def create_call!(contact, conversation)
+    call = Call.create!(
+      account: account,
+      inbox: inbox,
+      conversation: conversation,
+      contact: contact,
+      provider: provider,
+      direction: :incoming,
+      status: 'ringing',
+      provider_call_id: call_sid,
+      meta: { 'initiated_at' => Time.zone.now.to_i }.merge(extra_meta.stringify_keys)
+    )
+    # `conference_sid` is a Twilio bridging concept; WhatsApp goes browser↔Meta.
+    call.update!(conference_sid: call.default_conference_sid) if call.twilio?
+    call
   end
 end

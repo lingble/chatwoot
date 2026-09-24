@@ -24,7 +24,7 @@ import { useI18n } from 'vue-i18n';
  * @property {boolean} hasInput - Whether operator requires an input value
  */
 
-const FILTER_OPS = {
+export const FILTER_OPS = {
   EQUAL_TO: 'equal_to',
   NOT_EQUAL_TO: 'not_equal_to',
   IS_PRESENT: 'is_present',
@@ -82,7 +82,7 @@ export function useOperators() {
         hasInput: !NO_INPUT_OPTS.includes(value),
         inputOverride: OPS_INPUT_OVERRIDE[value] || null,
         icon: h('span', {
-          class: `${filterOperatorIcon[value]} !text-n-blue-text`,
+          class: `${filterOperatorIcon[value]} !text-n-blue-11`,
         }),
       };
       return acc;
