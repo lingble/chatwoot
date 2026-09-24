@@ -21,6 +21,20 @@ RSpec.describe Captain::Tools::HttpTool, type: :model do
     end
   end
 
+  describe '#available_in_reply_suggestion?' do
+    it 'allows GET tools' do
+      custom_tool.update!(http_method: 'GET')
+
+      expect(tool.available_in_reply_suggestion?).to be true
+    end
+
+    it 'rejects POST tools' do
+      custom_tool.update!(http_method: 'POST')
+
+      expect(tool.available_in_reply_suggestion?).to be false
+    end
+  end
+
   describe '#perform' do
     context 'with GET request' do
       before do
@@ -129,7 +143,7 @@ RSpec.describe Captain::Tools::HttpTool, type: :model do
       before do
         custom_tool.update!(
           auth_type: 'api_key',
-          auth_config: { 'key' => 'api_key_123', 'location' => 'header', 'name' => 'X-API-Key' },
+          auth_config: { 'key' => 'api_key_123', 'name' => 'X-API-Key' },
           endpoint_url: 'https://example.com/data',
           response_template: nil
         )
@@ -144,6 +158,22 @@ RSpec.describe Captain::Tools::HttpTool, type: :model do
         expect(result).to eq('{"authenticated": true}')
         expect(WebMock).to have_requested(:get, 'https://example.com/data')
           .with(headers: { 'X-API-Key' => 'api_key_123' })
+      end
+
+      it 'strips the API key header on cross-origin redirects' do
+        redirect_url = 'http://example.com/data'
+        redirected_headers = nil
+        stub_request(:get, 'https://example.com/data').to_return(status: 302, headers: { 'Location' => redirect_url })
+        stub_request(:get, redirect_url)
+          .with do |request|
+            redirected_headers = request.headers.transform_keys(&:downcase)
+            true
+          end
+          .to_return(status: 200, body: '{"authenticated": false}')
+
+        tool.perform(tool_context)
+
+        expect(redirected_headers).not_to include('x-api-key')
       end
     end
 
@@ -172,6 +202,16 @@ RSpec.describe Captain::Tools::HttpTool, type: :model do
         result = tool.perform(tool_context)
 
         expect(result).to eq('An error occurred while executing the request')
+      end
+
+      it 'marks playground failures for run details without changing production output' do
+        custom_tool.update!(endpoint_url: 'https://example.com/data')
+        stub_request(:get, 'https://example.com/data').to_raise(SocketError.new('Failed to connect'))
+        tool_context.state[:source] = 'playground'
+
+        result = tool.perform(tool_context)
+
+        expect(result).to eq('ERROR: An error occurred while executing the request')
       end
 
       it 'returns generic error message on timeout' do
@@ -235,6 +275,192 @@ RSpec.describe Captain::Tools::HttpTool, type: :model do
         result = tool.perform(tool_context, user_id: '42', product: 'Widget', quantity: 5)
 
         expect(result).to eq('Created order #ORD-789 for Widget')
+      end
+    end
+
+    context 'with metadata headers' do
+      let(:conversation) { create(:conversation, account: account) }
+      let(:contact) { conversation.contact }
+      let(:tool_context_with_state) do
+        Struct.new(:state).new({
+                                 account_id: account.id,
+                                 assistant_id: assistant.id,
+                                 conversation: {
+                                   id: conversation.id,
+                                   display_id: conversation.display_id
+                                 },
+                                 contact_inbox: {
+                                   id: conversation.contact_inbox.id,
+                                   hmac_verified: conversation.contact_inbox.hmac_verified
+                                 },
+                                 contact: {
+                                   id: contact.id,
+                                   email: contact.email,
+                                   phone_number: contact.phone_number
+                                 }
+                               })
+      end
+
+      before do
+        custom_tool.update!(
+          endpoint_url: 'https://example.com/api/data',
+          response_template: nil
+        )
+      end
+
+      it 'includes metadata headers in GET request' do
+        stub_request(:get, 'https://example.com/api/data')
+          .with(headers: {
+                  'X-Chatwoot-Account-Id' => account.id.to_s,
+                  'X-Chatwoot-Assistant-Id' => assistant.id.to_s,
+                  'X-Chatwoot-Tool-Slug' => custom_tool.slug,
+                  'X-Chatwoot-Conversation-Id' => conversation.id.to_s,
+                  'X-Chatwoot-Conversation-Display-Id' => conversation.display_id.to_s,
+                  'X-Chatwoot-Contact-Inbox-Id' => conversation.contact_inbox.id.to_s,
+                  'X-Chatwoot-Contact-Inbox-Verified' => conversation.contact_inbox.hmac_verified.to_s,
+                  'X-Chatwoot-Contact-Id' => contact.id.to_s,
+                  'X-Chatwoot-Contact-Email' => contact.email
+                })
+          .to_return(status: 200, body: '{"success": true}')
+
+        tool.perform(tool_context_with_state)
+
+        expect(WebMock).to have_requested(:get, 'https://example.com/api/data')
+          .with(headers: {
+                  'X-Chatwoot-Account-Id' => account.id.to_s,
+                  'X-Chatwoot-Contact-Inbox-Verified' => conversation.contact_inbox.hmac_verified.to_s,
+                  'X-Chatwoot-Contact-Email' => contact.email
+                })
+      end
+
+      it 'includes metadata headers in POST request' do
+        custom_tool.update!(http_method: 'POST', request_template: '{"data": "test"}')
+
+        stub_request(:post, 'https://example.com/api/data')
+          .with(
+            body: '{"data": "test"}',
+            headers: {
+              'Content-Type' => 'application/json',
+              'X-Chatwoot-Account-Id' => account.id.to_s,
+              'X-Chatwoot-Tool-Slug' => custom_tool.slug,
+              'X-Chatwoot-Contact-Inbox-Verified' => conversation.contact_inbox.hmac_verified.to_s,
+              'X-Chatwoot-Contact-Email' => contact.email
+            }
+          )
+          .to_return(status: 200, body: '{"success": true}')
+
+        tool.perform(tool_context_with_state)
+
+        expect(WebMock).to have_requested(:post, 'https://example.com/api/data')
+      end
+
+      it 'includes metadata headers along with authentication headers' do
+        custom_tool.update!(
+          auth_type: 'bearer',
+          auth_config: { 'token' => 'test_token' }
+        )
+
+        stub_request(:get, 'https://example.com/api/data')
+          .with(headers: {
+                  'Authorization' => 'Bearer test_token',
+                  'X-Chatwoot-Account-Id' => account.id.to_s,
+                  'X-Chatwoot-Contact-Inbox-Verified' => conversation.contact_inbox.hmac_verified.to_s,
+                  'X-Chatwoot-Contact-Id' => contact.id.to_s
+                })
+          .to_return(status: 200, body: '{"success": true}')
+
+        tool.perform(tool_context_with_state)
+
+        expect(WebMock).to have_requested(:get, 'https://example.com/api/data')
+          .with(headers: {
+                  'Authorization' => 'Bearer test_token',
+                  'X-Chatwoot-Contact-Id' => contact.id.to_s
+                })
+      end
+
+      it 'handles missing contact in tool context' do
+        tool_context_no_contact = Struct.new(:state).new({
+                                                           account_id: account.id,
+                                                           assistant_id: assistant.id,
+                                                           conversation: {
+                                                             id: conversation.id,
+                                                             display_id: conversation.display_id
+                                                           },
+                                                           contact_inbox: {
+                                                             id: conversation.contact_inbox.id,
+                                                             hmac_verified: conversation.contact_inbox.hmac_verified
+                                                           }
+                                                         })
+
+        stub_request(:get, 'https://example.com/api/data')
+          .with(headers: {
+                  'X-Chatwoot-Account-Id' => account.id.to_s,
+                  'X-Chatwoot-Conversation-Id' => conversation.id.to_s,
+                  'X-Chatwoot-Contact-Inbox-Verified' => conversation.contact_inbox.hmac_verified.to_s
+                })
+          .to_return(status: 200, body: '{"success": true}')
+
+        tool.perform(tool_context_no_contact)
+
+        expect(WebMock).to have_requested(:get, 'https://example.com/api/data')
+      end
+
+      it 'defaults contact inbox verified header to false when contact inbox is missing' do
+        tool_context_without_contact_inbox = Struct.new(:state).new({
+                                                                      account_id: account.id,
+                                                                      assistant_id: assistant.id,
+                                                                      conversation: {
+                                                                        id: conversation.id,
+                                                                        display_id: conversation.display_id
+                                                                      },
+                                                                      contact: {
+                                                                        id: contact.id,
+                                                                        email: contact.email
+                                                                      }
+                                                                    })
+
+        stub_request(:get, 'https://example.com/api/data')
+          .with(headers: {
+                  'X-Chatwoot-Contact-Inbox-Verified' => 'false'
+                })
+          .to_return(status: 200, body: '{"success": true}')
+
+        tool.perform(tool_context_without_contact_inbox)
+
+        expect(WebMock).to have_requested(:get, 'https://example.com/api/data')
+          .with(headers: { 'X-Chatwoot-Contact-Inbox-Verified' => 'false' })
+      end
+
+      it 'includes contact phone when present' do
+        contact.update!(phone_number: '+1234567890')
+        tool_context_with_state.state[:contact][:phone_number] = '+1234567890'
+
+        stub_request(:get, 'https://example.com/api/data')
+          .with(headers: {
+                  'X-Chatwoot-Contact-Phone' => '+1234567890'
+                })
+          .to_return(status: 200, body: '{"success": true}')
+
+        tool.perform(tool_context_with_state)
+
+        expect(WebMock).to have_requested(:get, 'https://example.com/api/data')
+          .with(headers: { 'X-Chatwoot-Contact-Phone' => '+1234567890' })
+      end
+
+      it 'includes unverified contact inbox status explicitly as false' do
+        conversation.contact_inbox.update!(hmac_verified: false)
+        tool_context_with_state.state[:contact_inbox][:hmac_verified] = false
+
+        stub_request(:get, 'https://example.com/api/data')
+          .with(headers: {
+                  'X-Chatwoot-Contact-Inbox-Verified' => 'false'
+                })
+          .to_return(status: 200, body: '{"success": true}')
+
+        tool.perform(tool_context_with_state)
+
+        expect(WebMock).to have_requested(:get, 'https://example.com/api/data')
+          .with(headers: { 'X-Chatwoot-Contact-Inbox-Verified' => 'false' })
       end
     end
   end

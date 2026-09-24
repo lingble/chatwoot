@@ -13,6 +13,14 @@ class ConversationApi extends ApiClient {
   updateLabels(conversationID, labels) {
     return axios.post(`${this.url}/${conversationID}/labels`, { labels });
   }
+
+  getSuggestions(conversationID, type) {
+    return axios.get(`${this.url}/${conversationID}/suggestions/${type}`);
+  }
+
+  getUnreadCounts() {
+    return axios.get(`${this.url}/unread_counts`);
+  }
 }
 
 export default new ConversationApi();

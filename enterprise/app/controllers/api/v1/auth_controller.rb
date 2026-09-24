@@ -3,6 +3,11 @@ class Api::V1::AuthController < Api::BaseController
   before_action :find_user_and_account, only: [:saml_login]
 
   def saml_login
+    unless saml_sso_enabled?
+      render json: { error: 'SAML SSO login is not enabled' }, status: :forbidden
+      return
+    end
+
     return if @account.nil?
 
     relay_state = params[:target] || 'web'
@@ -61,12 +66,16 @@ class Api::V1::AuthController < Api::BaseController
   end
 
   def sso_login_page_url(error: nil)
-    frontend_url = ENV.fetch('FRONTEND_URL', nil)
+    frontend_url = GlobalConfigService.load('FRONTEND_URL', 'http://localhost:3000')
     params = { error: error }.compact
 
     query = params.to_query
     query_fragment = query.present? ? "?#{query}" : ''
 
     "#{frontend_url}/app/login/sso#{query_fragment}"
+  end
+
+  def saml_sso_enabled?
+    GlobalConfigService.load('ENABLE_SAML_SSO_LOGIN', 'true').to_s == 'true'
   end
 end

@@ -17,10 +17,11 @@ RSpec.describe Captain::CustomTool, type: :model do
 
     describe 'slug uniqueness' do
       let(:account) { create(:account) }
+      let(:assistant) { create(:captain_assistant, account: account) }
 
-      it 'validates uniqueness of slug scoped to account' do
-        create(:captain_custom_tool, account: account, slug: 'custom_test_tool')
-        duplicate = build(:captain_custom_tool, account: account, slug: 'custom_test_tool')
+      it 'validates uniqueness of slug scoped to assistant' do
+        create(:captain_custom_tool, account: account, assistant: assistant, slug: 'custom_test_tool')
+        duplicate = build(:captain_custom_tool, account: account, assistant: assistant, slug: 'custom_test_tool')
 
         expect(duplicate).not_to be_valid
         expect(duplicate.errors[:slug]).to include('has already been taken')
@@ -28,10 +29,18 @@ RSpec.describe Captain::CustomTool, type: :model do
 
       it 'allows same slug across different accounts' do
         account2 = create(:account)
-        create(:captain_custom_tool, account: account, slug: 'custom_test_tool')
+        create(:captain_custom_tool, account: account, assistant: assistant, slug: 'custom_test_tool')
         different_account_tool = build(:captain_custom_tool, account: account2, slug: 'custom_test_tool')
 
         expect(different_account_tool).to be_valid
+      end
+
+      it 'allows same slug across assistants in the same account' do
+        other_assistant = create(:captain_assistant, account: account)
+        create(:captain_custom_tool, account: account, assistant: assistant, slug: 'custom_test_tool')
+        other_assistant_tool = build(:captain_custom_tool, account: account, assistant: other_assistant, slug: 'custom_test_tool')
+
+        expect(other_assistant_tool).to be_valid
       end
     end
 
@@ -102,44 +111,63 @@ RSpec.describe Captain::CustomTool, type: :model do
         enabled_tool = create(:captain_custom_tool, account: account, enabled: true)
         disabled_tool = create(:captain_custom_tool, account: account, enabled: false)
 
-        expect(described_class.enabled).to include(enabled_tool)
-        expect(described_class.enabled).not_to include(disabled_tool)
+        enabled_ids = described_class.enabled.pluck(:id)
+        expect(enabled_ids).to include(enabled_tool.id)
+        expect(enabled_ids).not_to include(disabled_tool.id)
       end
+    end
+  end
+
+  describe '#enabled_scenarios_count' do
+    let(:account) { create(:account) }
+    let(:assistant) { create(:captain_assistant, account: account) }
+    let(:other_assistant) { create(:captain_assistant, account: account) }
+
+    it 'counts only scenarios of its own assistant' do
+      tool = create(:captain_custom_tool, account: account, assistant: assistant, slug: 'custom_fetch-order')
+      create(:captain_custom_tool, account: account, assistant: other_assistant, slug: 'custom_fetch-order')
+      [assistant, other_assistant].each do |scenario_assistant|
+        create(:captain_scenario, account: account, assistant: scenario_assistant,
+                                  instruction: 'Use [@Fetch Order](tool://custom_fetch-order)')
+      end
+
+      expect(tool.enabled_scenarios_count).to eq(1)
     end
   end
 
   describe 'slug generation' do
     let(:account) { create(:account) }
+    let(:assistant) { create(:captain_assistant, account: account) }
 
     it 'generates slug from title on creation' do
-      tool = create(:captain_custom_tool, account: account, title: 'Fetch Order Status')
+      tool = create(:captain_custom_tool, account: account, assistant: assistant, title: 'Fetch Order Status')
 
       expect(tool.slug).to eq('custom_fetch_order_status')
     end
 
     it 'adds custom_ prefix to generated slug' do
-      tool = create(:captain_custom_tool, account: account, title: 'My Tool')
+      tool = create(:captain_custom_tool, account: account, assistant: assistant, title: 'My Tool')
 
       expect(tool.slug).to start_with('custom_')
     end
 
     it 'does not override manually set slug' do
-      tool = create(:captain_custom_tool, account: account, title: 'Test Tool', slug: 'custom_manual_slug')
+      tool = create(:captain_custom_tool, account: account, assistant: assistant, title: 'Test Tool', slug: 'custom_manual_slug')
 
       expect(tool.slug).to eq('custom_manual_slug')
     end
 
     it 'handles slug collisions by appending random suffix' do
-      create(:captain_custom_tool, account: account, title: 'Test Tool', slug: 'custom_test_tool')
-      tool2 = create(:captain_custom_tool, account: account, title: 'Test Tool')
+      create(:captain_custom_tool, account: account, assistant: assistant, title: 'Test Tool', slug: 'custom_test_tool')
+      tool2 = create(:captain_custom_tool, account: account, assistant: assistant, title: 'Test Tool')
 
       expect(tool2.slug).to match(/^custom_test_tool_[a-z0-9]{6}$/)
     end
 
     it 'handles multiple slug collisions' do
-      create(:captain_custom_tool, account: account, title: 'Test Tool', slug: 'custom_test_tool')
-      create(:captain_custom_tool, account: account, title: 'Test Tool', slug: 'custom_test_tool_abc123')
-      tool3 = create(:captain_custom_tool, account: account, title: 'Test Tool')
+      create(:captain_custom_tool, account: account, assistant: assistant, title: 'Test Tool', slug: 'custom_test_tool')
+      create(:captain_custom_tool, account: account, assistant: assistant, title: 'Test Tool', slug: 'custom_test_tool_abc123')
+      tool3 = create(:captain_custom_tool, account: account, assistant: assistant, title: 'Test Tool')
 
       expect(tool3.slug).to match(/^custom_test_tool_[a-z0-9]{6}$/)
       expect(tool3.slug).not_to eq('custom_test_tool')
@@ -147,14 +175,14 @@ RSpec.describe Captain::CustomTool, type: :model do
     end
 
     it 'does not generate slug when title is blank' do
-      tool = build(:captain_custom_tool, account: account, title: nil)
+      tool = build(:captain_custom_tool, account: account, assistant: assistant, title: nil)
 
       expect(tool).not_to be_valid
       expect(tool.errors[:title]).to include("can't be blank")
     end
 
     it 'parameterizes title correctly' do
-      tool = create(:captain_custom_tool, account: account, title: 'Fetch Order Status & Details!')
+      tool = create(:captain_custom_tool, account: account, assistant: assistant, title: 'Fetch Order Status & Details!')
 
       expect(tool.slug).to eq('custom_fetch_order_status_details')
     end
@@ -200,7 +228,7 @@ RSpec.describe Captain::CustomTool, type: :model do
 
       expect(tool.auth_type).to eq('api_key')
       expect(tool.auth_config['key']).to eq('test_api_key')
-      expect(tool.auth_config['location']).to eq('header')
+      expect(tool.auth_config['name']).to eq('X-API-Key')
     end
   end
 
@@ -258,17 +286,10 @@ RSpec.describe Captain::CustomTool, type: :model do
         expect(tool.build_auth_headers).to eq({ 'Authorization' => 'Bearer test_bearer_token_123' })
       end
 
-      it 'returns API key header when location is header' do
+      it 'returns API key header' do
         tool = create(:captain_custom_tool, :with_api_key, account: account)
 
         expect(tool.build_auth_headers).to eq({ 'X-API-Key' => 'test_api_key' })
-      end
-
-      it 'returns empty hash for API key when location is not header' do
-        tool = create(:captain_custom_tool, account: account, auth_type: 'api_key',
-                                            auth_config: { key: 'test_key', location: 'query', name: 'api_key' })
-
-        expect(tool.build_auth_headers).to eq({})
       end
 
       it 'returns empty hash for basic auth' do
@@ -324,6 +345,135 @@ RSpec.describe Captain::CustomTool, type: :model do
 
         result = tool.format_response(raw_response)
         expect(result).to eq('Response: plain text response')
+      end
+    end
+
+    describe '#build_metadata_headers' do
+      let(:tool) { create(:captain_custom_tool, account: account, slug: 'custom_test_tool') }
+      let(:conversation) { create(:conversation, account: account) }
+      let(:contact) { conversation.contact }
+
+      let(:state) do
+        {
+          account_id: account.id,
+          assistant_id: 123,
+          conversation: {
+            id: conversation.id,
+            display_id: conversation.display_id
+          },
+          contact_inbox: {
+            id: conversation.contact_inbox.id,
+            hmac_verified: conversation.contact_inbox.hmac_verified
+          },
+          contact: {
+            id: contact.id,
+            email: contact.email,
+            phone_number: contact.phone_number
+          }
+        }
+      end
+
+      it 'includes account and assistant metadata' do
+        headers = tool.build_metadata_headers(state)
+
+        expect(headers['X-Chatwoot-Account-Id']).to eq(account.id.to_s)
+        expect(headers['X-Chatwoot-Assistant-Id']).to eq('123')
+      end
+
+      it 'includes tool slug' do
+        headers = tool.build_metadata_headers(state)
+
+        expect(headers['X-Chatwoot-Tool-Slug']).to eq('custom_test_tool')
+      end
+
+      it 'includes conversation metadata when present' do
+        headers = tool.build_metadata_headers(state)
+
+        expect(headers['X-Chatwoot-Conversation-Id']).to eq(conversation.id.to_s)
+        expect(headers['X-Chatwoot-Conversation-Display-Id']).to eq(conversation.display_id.to_s)
+      end
+
+      it 'includes contact metadata when present' do
+        headers = tool.build_metadata_headers(state)
+
+        expect(headers['X-Chatwoot-Contact-Id']).to eq(contact.id.to_s)
+        expect(headers['X-Chatwoot-Contact-Email']).to eq(contact.email)
+      end
+
+      it 'includes contact inbox verification metadata when present' do
+        headers = tool.build_metadata_headers(state)
+
+        expect(headers['X-Chatwoot-Contact-Inbox-Id']).to eq(conversation.contact_inbox.id.to_s)
+        expect(headers['X-Chatwoot-Contact-Inbox-Verified']).to eq(conversation.contact_inbox.hmac_verified.to_s)
+      end
+
+      it 'handles missing conversation gracefully' do
+        state[:conversation] = nil
+
+        headers = tool.build_metadata_headers(state)
+
+        expect(headers['X-Chatwoot-Conversation-Id']).to be_nil
+        expect(headers['X-Chatwoot-Conversation-Display-Id']).to be_nil
+        expect(headers['X-Chatwoot-Account-Id']).to eq(account.id.to_s)
+      end
+
+      it 'handles missing contact gracefully' do
+        state[:contact] = nil
+
+        headers = tool.build_metadata_headers(state)
+
+        expect(headers['X-Chatwoot-Contact-Id']).to be_nil
+        expect(headers['X-Chatwoot-Contact-Email']).to be_nil
+        expect(headers['X-Chatwoot-Account-Id']).to eq(account.id.to_s)
+      end
+
+      it 'handles missing contact inbox gracefully' do
+        state[:contact_inbox] = nil
+
+        headers = tool.build_metadata_headers(state)
+
+        expect(headers['X-Chatwoot-Contact-Inbox-Id']).to be_nil
+        expect(headers['X-Chatwoot-Contact-Inbox-Verified']).to eq('false')
+      end
+
+      it 'handles empty state' do
+        headers = tool.build_metadata_headers({})
+
+        expect(headers).to be_a(Hash)
+        expect(headers['X-Chatwoot-Tool-Slug']).to eq('custom_test_tool')
+        expect(headers['X-Chatwoot-Contact-Inbox-Verified']).to eq('false')
+      end
+
+      it 'omits contact email header when email is blank' do
+        state[:contact][:email] = ''
+
+        headers = tool.build_metadata_headers(state)
+
+        expect(headers).not_to have_key('X-Chatwoot-Contact-Email')
+      end
+
+      it 'omits contact phone header when phone number is blank' do
+        state[:contact][:phone_number] = ''
+
+        headers = tool.build_metadata_headers(state)
+
+        expect(headers).not_to have_key('X-Chatwoot-Contact-Phone')
+      end
+
+      it 'includes contact inbox verified header when false' do
+        state[:contact_inbox][:hmac_verified] = false
+
+        headers = tool.build_metadata_headers(state)
+
+        expect(headers['X-Chatwoot-Contact-Inbox-Verified']).to eq('false')
+      end
+
+      it 'defaults contact inbox verified header to false when value is nil' do
+        state[:contact_inbox][:hmac_verified] = nil
+
+        headers = tool.build_metadata_headers(state)
+
+        expect(headers['X-Chatwoot-Contact-Inbox-Verified']).to eq('false')
       end
     end
 

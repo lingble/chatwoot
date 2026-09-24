@@ -14,6 +14,16 @@ class EnterpriseAccountAPI extends ApiClient {
     return axios.post(`${this.url}subscription`);
   }
 
+  billingSummary({ refresh = false } = {}) {
+    return axios.get(`${this.url}billing_summary`, {
+      params: { refresh },
+    });
+  }
+
+  selectBillingCurrency(currency) {
+    return axios.post(`${this.url}select_billing_currency`, { currency });
+  }
+
   getLimits() {
     return axios.get(`${this.url}limits`);
   }
@@ -22,6 +32,15 @@ class EnterpriseAccountAPI extends ApiClient {
     return axios.post(`${this.url}toggle_deletion`, {
       action_type: action,
     });
+  }
+
+  createTopupCheckout(credits) {
+    return axios.post(`${this.url}topup_checkout`, { credits });
+  }
+
+  // Topup packages for the account's billing currency.
+  getTopupOptions() {
+    return axios.get(`${this.url}topup_options`);
   }
 }
 

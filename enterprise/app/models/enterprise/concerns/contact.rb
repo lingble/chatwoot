@@ -1,6 +1,6 @@
 module Enterprise::Concerns::Contact
   extend ActiveSupport::Concern
   included do
-    belongs_to :company, optional: true
+    has_many :campaign_recipients, dependent: :destroy_async
   end
 end
