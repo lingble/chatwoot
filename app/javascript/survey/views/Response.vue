@@ -194,7 +194,6 @@ export default {
           @send-feedback="sendFeedback"
         />
       </div>
-      <div class="mb-3" />
     </div>
   </div>
 </template>
