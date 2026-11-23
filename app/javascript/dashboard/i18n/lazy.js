@@ -26,7 +26,13 @@ export async function setI18nLocale(locale) {
   const { global } = getI18n();
   const load = loaders[`./locale/${locale}/index.js`];
   if (load && !global.availableLocales.includes(locale)) {
-    global.setLocaleMessage(locale, await load());
+    try {
+      global.setLocaleMessage(locale, await load());
+    } catch (error) {
+      // The chunk failed to download: stay in the current language instead of
+      // failing the caller (e.g. a successful account update shown as an error).
+      return;
+    }
   }
   global.locale.value = locale;
 }
