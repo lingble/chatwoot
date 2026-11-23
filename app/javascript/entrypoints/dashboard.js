@@ -1,5 +1,4 @@
 import { createApp } from 'vue';
-import { createI18n } from 'vue-i18n';
 
 import axios from 'axios';
 // Global Components
@@ -10,7 +9,7 @@ import WootWizard from 'components/ui/Wizard.vue';
 import FloatingVue from 'floating-vue';
 import WootUiKit from 'dashboard/components';
 import App from 'dashboard/App.vue';
-import i18nMessages from 'dashboard/i18n';
+import { getI18n } from 'dashboard/i18n/lazy';
 import createAxios from 'dashboard/helper/APIHelper';
 
 import commonHelpers, { isJSONValid } from 'dashboard/helper/commons';
@@ -34,18 +33,12 @@ import { directive as onClickaway } from 'vue3-click-away';
 import 'floating-vue/dist/style.css';
 import '@chatwoot/viz/style.css';
 
-const i18n = createI18n({
-  legacy: false, // https://github.com/intlify/vue-i18n/issues/1902
-  locale: 'en',
-  messages: i18nMessages,
-});
-
 sync(store, router);
 
 const pinia = createPinia();
 
 const app = createApp(App);
-app.use(i18n);
+app.use(getI18n());
 app.use(store);
 app.use(pinia);
 app.use(router);
