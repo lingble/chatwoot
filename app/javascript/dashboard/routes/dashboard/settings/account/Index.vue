@@ -139,9 +139,9 @@ export default {
           domain: this.domain,
           support_email: this.supportEmail,
         });
+        this.getAccount(this.id).locale = this.locale;
         // If user locale is set, update the locale with user locale
         await setI18nLocale(this.uiSettings?.locale || this.locale);
-        this.getAccount(this.id).locale = this.locale;
         useAlert(this.$t('GENERAL_SETTINGS.UPDATE.SUCCESS'));
       } catch (error) {
         useAlert(this.$t('GENERAL_SETTINGS.UPDATE.ERROR'));

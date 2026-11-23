@@ -10,6 +10,7 @@ const loaders = import.meta.glob(
 );
 
 let i18n;
+let requested;
 
 // Created on first use so that importing this module has no side effects.
 export const getI18n = () => {
@@ -23,16 +24,18 @@ export const getI18n = () => {
 
 export async function setI18nLocale(locale) {
   if (!locale) return;
+  requested = locale;
   const { global } = getI18n();
   const load = loaders[`./locale/${locale}/index.js`];
   if (load && !global.availableLocales.includes(locale)) {
     try {
       global.setLocaleMessage(locale, await load());
     } catch (error) {
-      // The chunk failed to download: stay in the current language instead of
-      // failing the caller (e.g. a successful account update shown as an error).
+      // The chunk failed to download (for example a stale tab after a deploy):
+      // stay in the current language instead of failing the caller.
       return;
     }
   }
-  global.locale.value = locale;
+  // Another locale may have been requested while this chunk was loading.
+  if (requested === locale) global.locale.value = locale;
 }
