@@ -22,6 +22,7 @@ import {
 } from './helper/pushHelper';
 import ReconnectService from 'dashboard/helper/ReconnectService';
 import { useUISettings } from 'dashboard/composables/useUISettings';
+import { setI18nLocale } from 'dashboard/i18n/lazy';
 
 export default {
   name: 'App',
@@ -103,9 +104,7 @@ export default {
       mql.onchange = e => setColorTheme(e.matches);
     },
     setLocale(locale) {
-      if (locale) {
-        this.$root.$i18n.locale = locale;
-      }
+      setI18nLocale(locale);
     },
     async initializeAccount() {
       await this.$store.dispatch('accounts/get');

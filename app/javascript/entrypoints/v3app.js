@@ -1,7 +1,6 @@
 import { createApp } from 'vue';
-import { createI18n } from 'vue-i18n';
 
-import i18nMessages from 'dashboard/i18n';
+import { getI18n } from 'dashboard/i18n/lazy';
 import * as Sentry from '@sentry/vue';
 import {
   initializeAnalyticsEvents,
@@ -17,14 +16,8 @@ import FluentIcon from 'shared/components/FluentIcon/DashboardIcon.vue';
 // Commenting it out for Vite migration
 // Vue.config.env = process.env;
 
-const i18n = createI18n({
-  legacy: false, // https://github.com/intlify/vue-i18n/issues/1902
-  locale: 'en',
-  messages: i18nMessages,
-});
-
 const app = createApp(App);
-app.use(i18n);
+app.use(getI18n());
 app.use(store);
 app.use(router);
 

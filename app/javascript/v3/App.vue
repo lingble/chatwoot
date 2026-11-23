@@ -1,5 +1,6 @@
 <script>
 import SnackbarContainer from './components/SnackBar/Container.vue';
+import { setI18nLocale } from 'dashboard/i18n/lazy';
 
 export default {
   components: { SnackbarContainer },
@@ -35,9 +36,7 @@ export default {
       };
     },
     setLocale(locale) {
-      if (locale) {
-        this.$root.$i18n.locale = locale;
-      }
+      setI18nLocale(locale);
     },
   },
 };

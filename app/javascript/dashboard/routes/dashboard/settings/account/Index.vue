@@ -6,6 +6,7 @@ import { useAlert } from 'dashboard/composables';
 import { useUISettings } from 'dashboard/composables/useUISettings';
 import { useConfig } from 'dashboard/composables/useConfig';
 import { useAccount } from 'dashboard/composables/useAccount';
+import { setI18nLocale } from 'dashboard/i18n/lazy';
 import { FEATURE_FLAGS } from '../../../../featureFlags';
 import WithLabel from 'v3/components/Form/WithLabel.vue';
 import NextInput from 'next/input/Input.vue';
@@ -113,10 +114,7 @@ export default {
         const { name, locale, id, domain, support_email, features } =
           this.getAccount(this.accountId);
 
-        const effectiveLocale = this.uiSettings?.locale || locale;
-        if (effectiveLocale) {
-          this.$root.$i18n.locale = effectiveLocale;
-        }
+        setI18nLocale(this.uiSettings?.locale || locale);
         this.name = name;
         this.locale = locale;
         this.id = id;
@@ -141,12 +139,9 @@ export default {
           domain: this.domain,
           support_email: this.supportEmail,
         });
-        // If user locale is set, update the locale with user locale
-        const updatedLocale = this.uiSettings?.locale || this.locale;
-        if (updatedLocale) {
-          this.$root.$i18n.locale = updatedLocale;
-        }
         this.getAccount(this.id).locale = this.locale;
+        // If user locale is set, update the locale with user locale
+        await setI18nLocale(this.uiSettings?.locale || this.locale);
         useAlert(this.$t('GENERAL_SETTINGS.UPDATE.SUCCESS'));
       } catch (error) {
         useAlert(this.$t('GENERAL_SETTINGS.UPDATE.ERROR'));
